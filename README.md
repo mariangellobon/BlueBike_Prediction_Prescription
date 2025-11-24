@@ -1,2 +1,2 @@
-# BlueBike_Prediction-Prescription
+# Predicting and Prescribing Bluebikes Station Balances Near MIT Campus
 We aim to predict imbalances in Bluebikes stations around the MIT campus—specifically, when stations are likely to become full (no available docks) or empty (no available bikes). Using these predictions, we will prescribe strategies for rebalancing bikes or expanding dock capacity to minimize user inconvenience and improve system efficiency
