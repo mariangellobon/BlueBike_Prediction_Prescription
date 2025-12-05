@@ -1,0 +1,268 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\geometry{margin=1in}
+
+\title{Predicting and Optimizing Bike Redistribution in BlueBikes System for MIT Campus}
+\author{Maria Lobon and Franco Martino}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report develops a predictive–prescriptive framework for improving bicycle availability in the BlueBikes system around the MIT campus. To address the persistent imbalance between stations near dorms and stations near classrooms, we adopt a two-stage approach: first, we train optimal regression trees for each station-hour combination to predict net demand; second, we solve a stochastic optimization problem that minimizes expected costs by considering similar historical observations. Our method incorporates external information (weather, academic calendar) while accounting for uncertainty. We compare three strategies: no redistribution, redistribution based on point predictions, and redistribution based on weighted historical costs from similar observations.
+\end{abstract}
+
+\section{Problem}
+
+\subsection{Problem Description and Relevance}
+
+BlueBikes is a key transportation resource for MIT students traveling between dormitories, classrooms, departments, and other campus locations. Despite its convenience, the system frequently experiences significant imbalances. For example, in some hours stations near dorms tend to empty out early in the day as students leave for class, while stations near classrooms quickly fill up. Later, when students return to their dorms, the opposite occurs—stations near classrooms become empty while dorm-area stations become full.
+
+These predictable but disruptive patterns create operational inefficiencies and inconvenience users who are unable to pick up or return bikes when needed. Improving the redistribution of bikes across stations is therefore essential for maintaining service reliability and enhancing user satisfaction. Our work focuses on predicting these imbalances and optimizing redistribution actions to mitigate them under uncertainty
+
+\subsection{Redistribution}
+
+To address this imbalance, we consider a redistribution system where bikes can be moved between stations at the beginning of each hour. Moving a bike has a cost ($q$). After natural user demand occurs during the hour, stations may end up empty or full, which generates penalty costs ($p_{\text{empty}}$) and ($p_{\text{full}}$).
+The goal is to choose redistributions at the start of each hour that minimize the expected total cost — balancing the cost of moving bikes ($q$) with the expected penalties ($p_{\text{empty}}$) and ($p_{\text{full}}$) once demand unfolds.
+
+In practice, this could be implemented through the BlueBikes app by offering users payments or ride credits valued at ($q$) to move bikes from one station to another. Similarly, ($p_{\text{empty}}$) and ($p_{\text{full}}$) could represent the expected monetary loss each time a station ends up empty or full—for example, from missed trips, user dissatisfaction, or reduced subscription value.
+
+\subsection{Problem Formal Definition}
+
+For a specific hour and day, we define the following optimization problem. We focus on a subset $N$ of stations that are close to the MIT campus, as these are the stations most relevant for student transportation needs.
+
+\begin{itemize}
+    
+    \item \textbf{$C_i$ (constant)}: The capacity of station $i$ for all $i \in N$. This represents the maximum number of bikes that can be stored at station $i$ at any given time.
+    
+    \item \textbf{$S_i$ (constant)}: The number of bikes at station $i$ at the start of the hour (which equals the number of bikes at the end of the previous hour). This is known at the time we make redistribution decisions.
+    
+    \item \textbf{$q$ (constant)}: The cost of moving one bike from one station to another. This could represent the rewards or payments given to users for performing the redistribution work. We assume this cost is constant across all station pairs, which is reasonable since we are only considering stations near MIT that are relatively close to each other.
+    
+    \item \textbf{$p_{\text{full}}$ (constant)}: The cost or penalty incurred when a station is full at the end of the hour. This represents the inconvenience and potential lost usage when users cannot return their bikes.
+    
+    \item \textbf{$p_{\text{empty}}$ (constant)}: The cost or penalty incurred when a station is empty at the end of the hour. This represents the inconvenience and potential lost usage when users cannot find bikes to use.
+    
+    \item \textbf{$\hat{d}_i$ (uncertain parameter)}: The net demand for bikes at station $i$ during the hour. This is defined as the number of intended pickups minus the number of drop-offs. This parameter is uncertain---we do not know its value when making redistribution decisions at the start of the hour, but we can use historical data and predictive models to estimate its distribution.
+
+    \item \textbf{$x_{ij}$ (decision variable)}: The number of bikes that we decide to move from station $i$ to station $j$ at the start of the hour. This is defined for all $i, j \in N$ where $i \neq j$ (we cannot move bikes from a station to itself). These variables are non-negative integers, representing the discrete nature of bike movements.
+    
+    \item \textbf{$z_i^{\text{empty}}$ (binary indicator)}: A binary variable that equals 1 if station $i$ is empty at the end of the hour (after redistribution and demand realization), and 0 otherwise. This variable helps us track and penalize empty stations.
+    
+    \item \textbf{$z_i^{\text{full}}$ (binary indicator)}: A binary variable that equals 1 if station $i$ is full at the end of the hour (after redistribution and demand realization), and 0 otherwise. This variable helps us track and penalize full stations.
+\end{itemize}
+
+
+We want to minimize the total expected cost, which consists of two components:
+
+\begin{enumerate}
+    \item \textbf{Redistribution costs}: The total cost of moving bikes between stations. This is given by:
+    \begin{equation}
+        q \sum_{i \in N} \sum_{j \in N, j \neq i} x_{ij}
+    \end{equation}
+    This represents the sum of all bike movements multiplied by the unit cost $q$ of moving one bike.
+    
+    \item \textbf{Expected penalty costs}: The expected cost of having empty or full stations. This is given by:
+    \begin{equation}
+        \mathbb{E}\left[p_{\text{empty}} \sum_{i \in N} z_i^{\text{empty}} + p_{\text{full}} \sum_{i \in N} z_i^{\text{full}}\right]
+    \end{equation}
+ 
+\end{enumerate}
+
+The complete objective function is:
+\begin{equation}
+\min_{x, z} \quad q \sum_{i \in N} \sum_{j \in N, j \neq i} x_{ij} + \mathbb{E}\left[p_{\text{empty}} \sum_{i \in N} z_i^{\text{empty}} + p_{\text{full}} \sum_{i \in N} z_i^{\text{full}}\right]
+\end{equation}
+
+
+
+The optimization problem is subject to several types of constraints:
+
+
+\begin{align}
+    S_i + \sum_{j \in N, j \neq i} x_{ji} - \sum_{j \in N, j \neq i} x_{ij} &\geq 0 \quad \forall i \in N \label{eq:stock_lower}\\
+    S_i + \sum_{j \in N, j \neq i} x_{ji} - \sum_{j \in N, j \neq i} x_{ij} &\leq C_i \quad \forall i \in N \label{eq:stock_upper}
+\end{align}
+
+These constraints ensure that the redistribution is physically feasible. After redistribution (but before demand is realized), the stock at each station must be non-negative and cannot exceed the station's capacity.
+
+\begin{align}
+    S_i + \sum_{j \in N, j \neq i} x_{ji} - \sum_{j \in N, j \neq i} x_{ij} + \hat{d}_{ik} &\geq 1 - M \cdot z_{ik}^{\text{empty}} \quad \forall i \in N, \forall k \label{eq:empty_bigm}\\
+    S_i + \sum_{j \in N, j \neq i} x_{ji} - \sum_{j \in N, j \neq i} x_{ij} + \hat{d}_{ik} &\leq C_i - 1 + M \cdot z_{ik}^{\text{full}} \quad \forall i \in N, \forall k \label{eq:full_bigm}
+\end{align}
+
+These constraints connect the uncertain demand to the binary indicators $z_i^{\text{empty}}$ and $z_i^{\text{full}}$. For each station $i$ and each possible demand scenario $k$ (with probability $w_k$), we need to determine whether the station will be empty or full after demand is realized.
+
+$M$ is a sufficiently large constant (e.g., $M = \max_i C_i + 1$, since the demand goes from $-C_i$ to $C_i$) 
+
+Finally, the decision variables must satisfy their domain restrictions:
+
+\begin{align}
+    x_{ij} &\in \mathbb{Z}_{\geq 0} \quad \forall i, j \in N, i \neq j \label{eq:int}\\
+    z_i^{\text{empty}}, z_i^{\text{full}} &\in \{0, 1\} \quad \forall i \in N \label{eq:binary}
+\end{align}
+
+
+
+\section{Data}
+
+Using publicly available BlueBikes data, we obtained historical trip data from 2018 onwards. We processed this data to compute, for each day, each hour, and each station, the net demand (number of pickups minus drop-offs).
+
+We complemented this data with external information to enrich our predictions:
+
+\begin{itemize}
+    \item \textbf{MIT Academic Calendar}: Information about semesters, exam periods, and holidays
+    \item \textbf{Weather Data}: Temperature, humidity, atmospheric pressure, wind speed, weather conditions, and precipitation
+    \item \textbf{Time Features}: Day of week, whether it's a weekend
+\end{itemize}
+
+This enriched dataset allows us to capture both the temporal patterns in bike usage and the influence of external factors such as weather conditions and academic schedules on demand patterns.
+
+\subsection{Train-Test Split}
+
+To properly evaluate our approach, we split the data into training and testing sets:
+
+\begin{itemize}
+    \item \textbf{Training set}: Contains historical data from 2018 to September 2024. 
+    
+    \item \textbf{Test set}: Contains data from October 2024 onwards (396 days, 24 hours per day).
+    
+\end{itemize}
+
+\section{Methods}
+
+\subsection{Optimal Regression Trees}
+
+We train an optimal regression tree for each station and each hour combination (240 trees total: 10 stations $\times$ 24 hours). Each tree focuses on a specific station-hour pair---for example, station 3 from 7:00 AM to 8:00 AM across different days of the year.
+
+We chose to train multiple models rather than a single one for several reasons:
+\begin{itemize}
+    \item \textbf{Leaf consistency}: Data points in each leaf always correspond to the same station and same hour, respecting maximum and minimum capacities of the station.
+    \item \textbf{External information}: The tree focuses on incorporating external information such as weather or academic calendar
+    \item \textbf{Computational efficiency}: Training smaller models (approximately 2000 observations per model) is faster than training a single large optimal model
+\end{itemize}
+
+All the optimal regression trees are trained using Interpretable AI (IAI) with the following hyperparameters (found through cross-validation in some trees):
+\begin{itemize}
+    \item Maximum depth: 8
+    \item Minimum bucket size: 5
+    \item Complexity parameter (cp): 0.01
+\end{itemize}
+
+\subsection{Prescriptive Weighted Cost Optimization}
+
+For prescription, we follow the prescriptive optimization approach where we minimize a cost function that is the weighted average of costs from ``similar'' data points in our dataset. 
+
+\subsubsection{Obtaining Similar Data Points}
+
+For a given test observation (specific day, hour, and station), we:
+\begin{enumerate}
+    \item Use the corresponding trained regression tree to determine which leaf the test observation falls into
+    \item Collect all training observations that fall into the same leaf
+    \item Extract the net demands from these similar historical observations
+    \item Count the frequency of each unique net demand value
+    \item Compute probabilities as the relative frequencies of each net demand value
+\end{enumerate}
+
+This process yields a probability distribution over possible net demand values for each station, based on historical observations that share similar characteristics (same station, same hour, and similar external conditions as determined by the tree).
+
+\subsubsection{Justification of the Approach}
+
+This approach allows us to:
+\begin{itemize}
+    \item \textbf{Incorporate external information}: The regression tree uses weather and academic calendar features to identify similar historical situations
+    \item \textbf{Account for uncertainty}: By optimizing decisions based on similar historical observations within each leaf of the regression tree, we consider the full distribution of possible outcomes rather than just a point estimate
+    \item \textbf{Produce robust prescriptions}: The weighted cost approach produces more robust and informed prescriptions compared to simply using point predictions, as it accounts for the variability in historical demand patterns
+\end{itemize}
+
+\section{Results}
+
+We compared three strategies on the test set (October 2024 onwards, 396 days $\times$ 24 hours):
+
+\begin{enumerate}
+    \item \textbf{No redistribution}: Only incurs costs from empty/full stations (baseline)
+    \item \textbf{Redistribution with point predictions}: Uses single-point demand predictions (rounded and truncated to feasible range) to solve the optimization problem
+    \item \textbf{Redistribution with weighted historical costs}: Uses the distribution of similar historical observations (from tree leaves) to solve the optimization problem
+\end{enumerate}
+
+For each strategy, we compute average costs per hour using the following assumed costs:
+\begin{itemize}
+    \item $q$ (cost per bike redistribution): 2
+    \item $p_{\text{empty}}$ (penalty for empty stations): 50
+    \item $p_{\text{full}}$ (penalty for full stations): 50
+\end{itemize}
+
+
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Strategy} & \textbf{Average Cost per Hour} & \textbf{Improvement} \\
+\midrule
+No redistribution (baseline) & 177.93 & --- \\
+Redistribution with point predictions & 62.98 & 64.6\% \\
+Redistribution with weighted historical costs & 44.54 & 75.0\% \\
+\bottomrule
+\end{tabular}
+\caption{Average cost per hour for each strategy on the test set}
+\label{tab:results}
+\end{table}
+
+
+\section{Discussion and Conclusion}
+
+The results presented in this report demonstrate the effectiveness of our prescriptive optimization approach for bike redistribution in the BlueBikes system around the MIT campus. The method successfully combines optimal regression trees from Interpretable AI (IAI) with robust optimization techniques to achieve substantial cost reductions.
+
+The IAI optimal regression trees provide several key advantages: they are optimal in their structure, incorporate robustness through the complexity parameter (cp), and effectively leverage external information such as MIT academic calendar data and weather conditions.
+
+The weighted historical cost method enables the incorporation of external data (MIT calendar, weather) through the regression tree features, while simultaneously providing robustness in the optimization model by considering the full distribution of similar historical outcomes rather than relying on single point predictions. This approach allows us to balance the predictive power of external features with the uncertainty inherent in demand forecasting.
+
+The cost savings achieved are particularly impressive when considered over longer time horizons. Since these are hourly costs, the annual savings would be substantial. For example, a reduction of 133.39 per hour (from 177.93 to 44.54) translates to approximately 1,168,496 per year. The actual savings will depend on the real-world costs assigned to redistribution operations ($q$) and penalties ($p_{\text{empty}}$, $p_{\text{full}}$), but the results clearly demonstrate that such a system can provide significant economic value.
+
+In conclusion, our approach successfully addresses the bike-sharing imbalance problem through a two-stage method that combines predictive modeling with prescriptive optimization. The results are excellent and demonstrate that incorporating uncertainty and external information into decision-making processes leads to more robust and cost-effective solutions. The method is generalizable to other bike-sharing systems and could potentially be adapted to other resource allocation problems with similar characteristics.
+
+\section*{Acknowledgments}
+Both team members contributed to the conceptualization and definition of the project and solution. The specific implementation contributions are as follows:
+
+\begin{itemize}
+    \item \textbf{Maria Lobon} was responsible for data download, analysis, and processing of the different data sources. This included working with the BlueBikes historical trip data, integrating external data sources (weather data, MIT academic calendar), and preparing the datasets for model training and evaluation.
+    
+    \item \textbf{Franco Martino} was responsible for implementing the decision trees, optimization models, and experimentation. This included training the optimal regression trees for each station-hour combination, implementing the prescriptive optimization problem, developing the evaluation framework, and running the computational experiments to compare different strategies.
+\end{itemize}
+
+We thank BlueBikes for making their data publicly available, and MIT for providing academic calendar information.
+
+\begin{thebibliography}{9}
+
+\bibitem{bluebikes}
+BlueBikes System Data. \url{https://www.bluebikes.com/system-data}
+
+\bibitem{iai}
+Interpretable AI. \url{https://www.interpretable.ai/}
+
+\bibitem{jump}
+JuMP: A Modeling Language for Mathematical Optimization. \url{https://jump.dev/}
+
+\bibitem{julia}
+Julia Programming Language. \url{https://julialang.org/}
+
+\bibitem{gurobi}
+Gurobi Optimizer. \url{https://www.gurobi.com/}
+
+\end{thebibliography}
+
+\end{document}
